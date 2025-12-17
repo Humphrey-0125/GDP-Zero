@@ -1,8 +1,4 @@
 __pycache__
 .mypy_cache
-*.sh
+
 *.ipynb
-*.txt
-test_*
-test/*
-logs/*

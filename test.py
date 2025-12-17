@@ -31,15 +31,7 @@ def main(args):
 	if args.h2h:
 		with open(args.h2h, 'rb') as f:
 			h2h_data: list = pickle.load(f)
-		# 允许长度不一致，按较短的一方截断做 head-to-head 比较
-		min_len = min(len(data), len(h2h_data))
-		if len(data) != len(h2h_data):
-			logger.warning(
-				"len(data)=%d, len(h2h_data)=%d, will truncate both to %d for h2h evaluation",
-				len(data), len(h2h_data), min_len
-			)
-		data = data[:min_len]
-		h2h_data = h2h_data[:min_len]
+		assert(len(data) == len(h2h_data))
 		assert(args.output != '')  # specify output path when doing h2h comparisons
 
 	result = []

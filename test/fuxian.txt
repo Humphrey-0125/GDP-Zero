@@ -1,0 +1,324 @@
+一、环境与准备
+1) Python & 依赖
+
+Python ≥ 3.9（建议 3.10）
+
+进入仓库根目录后：
+
+# 如果仓库有 requirements.txt
+pip install -r requirements.txt
+
+# 若无，则至少需要：openai, tqdm, nltk, pandas (汇总评测用)
+pip install openai tqdm nltk pandas
+python -c "import nltk; nltk.download('punkt')"
+
+2) API & 环境变量
+# OpenAI 直连
+export OPENAI_API_KEY=sk-xxxx
+
+# 或 Azure
+export MS_OPENAI_API_KEY=xxxx
+export MS_OPENAI_API_BASE="https://xxx.com"
+export MS_OPENAI_API_VERSION="xxx"
+export MS_OPENAI_API_CHAT_VERSION="xxx"
+
+# 让项目在 Python 可见
+export PYTHONPATH=$(pwd)
+
+3) 目录结构与输出
+mkdir -p outputs logs
+
+
+生成的对话与评测结果都会放在 outputs/ 下，便于统一对比与汇总。
+
+建议所有命令重定向日志到 logs/，便于定位异常与复核参数。
+
+二、快速 sanity check（5 分钟）
+
+先用最小配置跑一轮，确认链路 OK、API 正常、文件格式无误：
+
+# 1) 跑 baseline（直接 Prompt）
+python runners/raw_prompting.py \
+  --llm gpt-3.5-turbo \
+  --gen_sentences 3 \
+  --output outputs/chatgpt_raw_prompt.pkl \
+  > logs/00_raw_prompt.log 2>&1
+
+# 2) 跑 GDP-Zero（n=5, k=1，速度快）
+python runners/gdpzero.py \
+  --llm gpt-3.5-turbo \
+  --num_mcts_sims 5 \
+  --max_realizations 1 \
+  --Q_0 0.25 \
+  --num_dialogs 3 \
+  --gen_sentences 3 \
+  --output outputs/gdpzero_5sims_1rlz_Q025_3dialogs.pkl \
+  > logs/01_gdpzero_sanity.log 2>&1
+
+# 3) 静态评测（对人类 & Head-to-Head）
+python test.py \
+  -f outputs/gdpzero_5sims_1rlz_Q025_3dialogs.pkl \
+  --judge gpt-3.5-turbo \
+  --output outputs/eval_gdpzero_vs_human_sanity.pkl \
+  > logs/02_eval_sanity_human.log 2>&1
+
+python test.py \
+  -f outputs/gdpzero_5sims_1rlz_Q025_3dialogs.pkl \
+  --h2h outputs/chatgpt_raw_prompt.pkl \
+  --judge gpt-3.5-turbo \
+  --output outputs/eval_gdpzero_vs_chatgpt_sanity.pkl \
+  > logs/03_eval_sanity_h2h.log 2>&1
+
+
+看到 win rate 能正常输出即可，数值不必在意（样本太小）。接着进入正式实验。
+
+三、主实验（Static Evaluation）
+
+与论文 4.2 一致：前 20 个对话，每轮都规划并生成系统回复，然后用 ChatGPT 做**成对比较（pairwise）**评测。
+
+1) 生成候选（GDP-Zero 与基线）
+
+参数网格（论文要点 + 计算成本权衡）：
+
+仿真次数 n ∈ {5, 10, 20, 50}
+
+每状态缓存 k ∈ {1, 3}
+
+初始 Q 值 Q0 ∈ {0.0, 0.25, 0.5}
+
+先跑论文常用配置（推荐起步）：
+
+# Baseline: ChatGPT 直接生成
+python runners/raw_prompting.py \
+  --llm gpt-3.5-turbo \
+  --gen_sentences 5 \
+  --output outputs/chatgpt_raw_prompt.pkl \
+  > logs/10_raw_prompt_main.log 2>&1
+
+# GDP-Zero: n=10, k=3, Q0=0.25（论文推荐的“性能/时延”平衡点）
+python runners/gdpzero.py \
+  --llm gpt-3.5-turbo \
+  --num_mcts_sims 10 \
+  --max_realizations 3 \
+  --Q_0 0.25 \
+  --num_dialogs 20 \
+  --gen_sentences 5 \
+  --output outputs/gdpzero_10sims_3rlz_Q025_20dialogs.pkl \
+  > logs/11_gdpzero_n10_k3_Q025.log 2>&1
+
+
+扩展网格（可并行跑）：
+
+# n=5 / 20 / 50（固定 k=3, Q0=0.25）
+for N in 5 20 50; do
+  python runners/gdpzero.py \
+    --llm gpt-3.5-turbo \
+    --num_mcts_sims $N \
+    --max_realizations 3 \
+    --Q_0 0.25 \
+    --num_dialogs 20 \
+    --gen_sentences 5 \
+    --output outputs/gdpzero_${N}sims_3rlz_Q025_20dialogs.pkl \
+    > logs/11_gdpzero_n${N}_k3_Q025.log 2>&1
+done
+
+# k=1（更快）对比
+python runners/gdpzero.py \
+  --llm gpt-3.5-turbo \
+  --num_mcts_sims 10 \
+  --max_realizations 1 \
+  --Q_0 0.25 \
+  --num_dialogs 20 \
+  --gen_sentences 5 \
+  --output outputs/gdpzero_10sims_1rlz_Q025_20dialogs.pkl \
+  > logs/11_gdpzero_n10_k1_Q025.log 2>&1
+
+2) 静态评测（对人类 / 与基线 Head-to-Head）
+
+对每个生成结果都做两种评测：
+
+# a) 对比人类（Human Reference）
+python test.py \
+  -f outputs/gdpzero_10sims_3rlz_Q025_20dialogs.pkl \
+  --judge gpt-3.5-turbo \
+  --output outputs/eval_gdpzero_n10k3Q025_vs_human.pkl \
+  > logs/12_eval_n10k3Q025_vs_human.log 2>&1
+
+# b) 与 ChatGPT 基线一对一（Head-to-Head）
+python test.py \
+  -f outputs/gdpzero_10sims_3rlz_Q025_20dialogs.pkl \
+  --h2h outputs/chatgpt_raw_prompt.pkl \
+  --judge gpt-3.5-turbo \
+  --output outputs/eval_gdpzero_n10k3Q025_vs_chatgpt.pkl \
+  > logs/13_eval_n10k3Q025_vs_chatgpt.log 2>&1
+
+
+你应能观察到：
+
+对 ChatGPT 直接生成的胜率 ~55–60%；
+
+对人类示例的偏好不具有可比意义（评审偏好常偏向更精炼/更一致文本）——但论文里展示 GDP-Zero 也能获得较高偏好率。
+
+四、消融实验（Ablation, §4.4）
+
+验证论文中的关键设计（Open-Loop、响应挑选、仿真缓存）确实带来提升。
+
+# 1) 去掉 Open-Loop（闭环 MCTS，易误差累积）
+python runners/gdpzero_noopenloop.py \
+  --llm gpt-3.5-turbo \
+  --num_mcts_sims 10 \
+  --gen_sentences 5 \
+  --output outputs/gdpzero_noopenloop_10sims_20dialogs.pkl \
+  > logs/21_noopenloop.log 2>&1
+
+# 2) 去掉 Response Selection（不从缓存挑“高价值响应”）
+python runners/gdpzero_noRS.py \
+  --llm gpt-3.5-turbo \
+  --num_mcts_sims 10 \
+  --max_realizations 3 \
+  --Q_0 0.25 \
+  --gen_sentences 5 \
+  --output outputs/gdpzero_noRS_10sims_3rlz_Q025_20dialogs.pkl \
+  > logs/22_noRS.log 2>&1
+
+# 3) 统一用 test.py 评测（对人类、对 ChatGPT）
+for F in outputs/gdpzero_noopenloop_10sims_20dialogs.pkl \
+         outputs/gdpzero_noRS_10sims_3rlz_Q025_20dialogs.pkl; do
+  python test.py -f $F --judge gpt-3.5-turbo \
+    --output ${F/.pkl/_vs_human.pkl} \
+    > logs/23_eval_$(basename ${F})_human.log 2>&1
+  python test.py -f $F --h2h outputs/chatgpt_raw_prompt.pkl --judge gpt-3.5-turbo \
+    --output ${F/.pkl/_vs_chatgpt.pkl} \
+    > logs/24_eval_$(basename ${F})_h2h.log 2>&1
+done
+
+
+期望趋势（与论文一致）：
+
+去掉 Open-Loop → 性能明显下降；
+
+去掉 Response Selection → 输出质量/稳定性下降；
+
+减少仿真/缓存（n、k）→ 随之下降（可在主实验的网格里观察）。
+
+五、泛化测试（Generalization, §4.5）
+
+只换后端模型，其余流程不变，验证方法与具体 LLM 解耦。
+
+如果仓库暴露了 Codex 或其它模型名（README 示例有 code-davinci-002），可以直接替换 --llm 参数。若不可用，换成你手头的第二个 Chat 模型（例如 gpt-4o-mini、gpt-4o 等），核心思想相同：相同流程 + 更换后端。
+
+# GDP-Zero + 第二种后端
+python runners/gdpzero.py \
+  --llm code-davinci-002 \
+  --num_mcts_sims 10 \
+  --max_realizations 3 \
+  --Q_0 0.25 \
+  --num_dialogs 20 \
+  --gen_sentences 5 \
+  --output outputs/gdpzero_codex_10sims_3rlz_Q025_20dialogs.pkl \
+  > logs/31_gdpzero_codex.log 2>&1
+
+# Codex baseline
+python runners/raw_prompting.py \
+  --llm code-davinci-002 \
+  --gen_sentences 5 \
+  --output outputs/codex_raw_prompt.pkl \
+  > logs/32_raw_codex.log 2>&1
+
+# 评测（各自对基线 & 对人类）
+python test.py -f outputs/gdpzero_codex_10sims_3rlz_Q025_20dialogs.pkl \
+  --h2h outputs/codex_raw_prompt.pkl \
+  --judge gpt-3.5-turbo \
+  --output outputs/eval_gdpzero_codex_vs_codex_base.pkl \
+  > logs/33_eval_codex_h2h.log 2>&1
+
+python test.py -f outputs/gdpzero_codex_10sims_3rlz_Q025_20dialogs.pkl \
+  --judge gpt-3.5-turbo \
+  --output outputs/eval_gdpzero_codex_vs_human.pkl \
+  > logs/34_eval_codex_human.log 2>&1
+
+
+期望现象：在不同 LLM 后端上，GDP-Zero 相对其各自的 baseline 都有稳定增益（~+8% 左右的胜率提升）。
+
+六、结果汇总与出图（可选但推荐）
+
+把所有 eval_*.pkl 的统计（win/draw/lose、win rate）汇总成一张表，按（模型/参数）×（对人类/对基线）排列即可。示例字段设计：
+
+model_tag（如 gdpzero_n10_k3_Q025、noopenloop、noRS）
+
+judge（gpt-3.5-turbo）
+
+target（human / baseline）
+
+win, draw, lose, win_rate
+
+若仓库未自带汇总脚本，你可以用一段很短的 Python 解析 pickle 并生成 CSV。若你需要，我可以直接给你这段解析脚本。
+
+七、交互评测（可选拓展，§4.3 思路）
+
+仓库提供了 interactive.py，你可以用它做小规模人工交互，再发简短问卷（Likert 1–5）评估如下 6 维度：
+
+Persuasiveness, Argument Strength, Naturalness, Coherence, Manipulativeness, Willingness to Donate
+
+# 交互演示（默认 gdpzero；可用 --algo raw-prompt 切换基线）
+python interactive.py \
+  --llm gpt-3.5-turbo \
+  --num_mcts_sims 10 \
+  --max_realizations 3 \
+  --Q_0 0.25
+
+
+交互环节结果无法 1:1 复刻论文的众包分布，但可以验证方法在真实人类上的主观体验优势。
+
+八、复现实验清单（Checklist）
+
+ 环境安装、API 环境变量、PYTHONPATH
+
+ Sanity：baseline + gdpzero（n=5,k=1,num_dialogs=3），能出 win rate
+
+ 主实验：gdpzero(n=10,k=3,Q0=0.25,20 dialogs) + baseline
+
+ 网格：n∈{5,10,20,50}，k∈{1,3}，Q0∈{0.0,0.25,0.5}（至少选 2–3 个点）
+
+ 静态评测：对人类、对基线（全部生成文件都评测）
+
+ 消融：noopenloop、noRS（同评测法）
+
+ 泛化：替换后端 LLM（如 codex / 其它可用模型）
+
+ 结果汇总：导出 CSV 与汇总表/图
+
+ 记录每次运行的日志与参数（存入 logs/）
+
+九、复现中的小贴士（踩坑预防）
+
+速率与超时：MCTS 多次调用 API，n 和 k 直接决定时延与 token 成本。若速率受限，先用 n=5,k=1 验流程，再拉满。
+
+文本长度：--gen_sentences 控制生成句子数，太长会被 NLTK 截断；论文里追求“自然且简洁”，建议 3–5。
+
+随机性：OpenAI 接口无全局 seed；多次运行会有小抖动。用同一账号、同一参数、同一时间段可减小波动。
+
+文件命名：强烈建议把参数写进文件名（示例已给），保证后续评测与统计不串号。
+
+成本控制：先小样本（3 dialogs），再 20 dialogs；先低 n、k，再逐步上调，保存每步中间件结果。
+
+伦理：即使做劝说任务，也建议在交互评测里加入“是否感觉被操控”的维度，并保留退出权与知情同意说明。
+
+十、你最终应得到的核心产物
+
+候选对话文件：
+outputs/gdpzero_10sims_3rlz_Q025_20dialogs.pkl 等
+
+静态评测文件：
+outputs/eval_gdpzero_n10k3Q025_vs_chatgpt.pkl、..._vs_human.pkl
+
+消融评测文件：
+outputs/gdpzero_noopenloop_..._vs_chatgpt.pkl、gdpzero_noRS_..._vs_chatgpt.pkl
+
+泛化评测文件：
+outputs/eval_gdpzero_codex_vs_codex_base.pkl
+
+结果汇总 CSV/表格：一张总表即可回答三件事：
+① GDP-Zero 对基线是否稳定获胜；
+② Open-Loop、Response Selection 是否关键；
+③ 换后端时是否仍有增益。

@@ -115,16 +115,15 @@ class MCTS():
 
 class OpenLoopMCTS(MCTS):
 	def __init__(self, game, player, configs) -> None:
-		# 初始化：继承基础MCTS，并初始化“开放式”MCTS所需的数据结构
 		super().__init__(game, player, configs)
-		self.realizations: dict = {}        # 记录：每个状态对应的已采样到的真实对话轨迹列表 state -> [DialogSession, ...]
-		self.realizations_Vs: dict = {}     # 记录：每个状态下，不同生成的系统回复utterance的平均价值 state -> {utt: V}
-		self.realizations_Ns: dict = {}     # 记录：每个utterance被采样多少次 state -> {utt: N}
-		self.max_realizations = configs.max_realizations  # 每个状态最多缓存多少条真实轨迹
+		self.realizations: dict = {}  # state -> list of real DialogSessions
+		self.realizations_Vs: dict = {}  # state -> {realization: V(realization)}
+		self.realizations_Ns: dict = {}  # state -> {realization: N(realization)}
+		self.max_realizations = configs.max_realizations
 		return
 
 	def _to_string_rep(self, state:DialogSession):
-		# 将状态转换为可哈希字符串，只保留系统端的DA序列，用于open-loop MCTS的状态表示
+		# for tree search, keep all dialog turns
 		das = []
 		for (speaker, da, _) in state:
 			if speaker == state.SYS:
@@ -132,23 +131,19 @@ class OpenLoopMCTS(MCTS):
 		return "__".join(das)
 
 	def _init_node(self, state:DialogSession):
-		# 初始化一个新的叶子节点，包括P、Q、N等统计，并调用player.predict评估先验和节点价值
 		hashable_state = self._to_string_rep(state)
 		allowed_actions = self.player.get_valid_moves(state)
 		self.valid_moves[hashable_state] = allowed_actions.nonzero()[0]
 
-		# 初始化统计量
 		self.Ns[hashable_state] = 0
 		self.Nsa[hashable_state] = {action: 0 for action in self.valid_moves[hashable_state]}
 		self.Q[hashable_state] = {action: self.configs.Q_0 for action in self.valid_moves[hashable_state]}
-		self.realizations[hashable_state] = [state.copy()]  # 保存此状态的第一条对话轨迹
+		self.realizations[hashable_state] = [state.copy()]
 
-		# 调用LLM预测得到：先验策略prior & 当前节点价值v
 		prior, v = self.player.predict(state)
-		self.Vs[state.to_string_rep(keep_sys_da=True, keep_user_da=True)] = v  # 仅用于调试
+		self.Vs[state.to_string_rep(keep_sys_da=True, keep_user_da=True)] = v  # for debugging
 		self.P[hashable_state] = prior * allowed_actions
-
-		# 若无有效prior则均匀分配，否则归一化
+		# renormalize
 		if np.sum(self.P[hashable_state]) == 0:
 			self.P[hashable_state] = allowed_actions / np.sum(allowed_actions)
 			logger.warning("This should never happen")
@@ -157,12 +152,10 @@ class OpenLoopMCTS(MCTS):
 		return v
 
 	def _sample_realization(self, hashable_state):
-		# 从该状态下缓存的多个真实轨迹中随机采样一条，用于open-loop模拟
 		rand_i = np.random.randint(len(self.realizations[hashable_state]))
 		return self.realizations[hashable_state][rand_i]
 
 	def _add_new_realizations(self, state):
-		# 若此真实轨迹未被记录，则加入缓存；并保持缓存数量不超过上限
 		hashable_state = self._to_string_rep(state)
 		if hashable_state not in self.realizations:
 			self.realizations[hashable_state] = []
@@ -171,23 +164,22 @@ class OpenLoopMCTS(MCTS):
 		
 		self.realizations[hashable_state].append(state.copy())
 		if len(self.realizations[hashable_state]) > self.max_realizations:
+			# should never happen
 			logger.warning(f"len(self.realizations[hashable_state])={len(self.realizations[hashable_state])}")
 			self.realizations[hashable_state].pop(0)
 		return
 
 	def _get_next_state(self, state, best_action):
-		# 根据“当前状态+动作”尝试从缓存中获取后继状态；若数量已满，则直接复用（不再调用LLM生成）
 		prefetch_state = self._to_string_rep(state) + "__" + self.player.dialog_acts[best_action]
 		if prefetch_state in self.realizations and len(self.realizations[prefetch_state]) == self.max_realizations:
-			# 使用缓存的真实轨迹，减少模型调用次数
+			# use the cached realization
 			return self._sample_realization(prefetch_state)
 		
-		# 否则需要通过game环境生成新的后继状态（会触发LLM生成）
+		# otherwise, generate a new realization
 		next_state = self.game.get_next_state(state, best_action)
 		return next_state
 	
 	def _update_realizations_Vs(self, state: DialogSession, v: float):
-		# 回传更新：更新特定状态下某个系统utterance的平均价值
 		hashable_state = self._to_string_rep(state)
 		if hashable_state not in self.realizations_Vs:
 			self.realizations_Vs[hashable_state] = {}
@@ -199,65 +191,69 @@ class OpenLoopMCTS(MCTS):
 		if sys_utt not in self.realizations_Vs[hashable_state]:
 			self.realizations_Vs[hashable_state][sys_utt] = 0
 			self.realizations_Ns[hashable_state][sys_utt] = 0
-
-		# 用增量平均更新utterance价值
+		# update
 		self.realizations_Ns[hashable_state][sys_utt] += 1
 		self.realizations_Vs[hashable_state][sys_utt] += (v - self.realizations_Vs[hashable_state][sys_utt]) / self.realizations_Ns[hashable_state][sys_utt]
 		return
 
 	def search(self, state:DialogSession):
-		# MCTS核心递归：选择→扩展→模拟→回传（open-loop版本）
 		hashable_state = self._to_string_rep(state)
 		
-		# 若对话已结束，直接返回终局价值
+		# check everytime since state is stochastic, does not map to hashable_state
 		terminated_v = self.game.get_dialog_ended(state)
+		# check if it is terminal node
 		if terminated_v == 1.0:
 			logger.debug("ended")
 			return terminated_v
 		
-		# 若为叶子节点（从未访问过），扩展并返回初始价值
+		# otherwise, if is nontermial leaf node, we initialize and return v
 		if hashable_state not in self.P:
+			# selected leaf node, expand it
+			# first visit V because v is only evaluated once for a hashable_state
 			v = self._init_node(state)
 			return v
 		else:
-			# 已访问过：则将此新轨迹加入对应状态的缓存中
+			# add only when it is new
 			self._add_new_realizations(state)
 		
-		# 选择阶段：按PUCT公式选择UCT最大的动作
+		# existing, continue selection
+		# go next state by picking best according to U(s,a)
 		best_uct = -float('inf')
 		best_action = -1
 		for a in self.valid_moves[hashable_state]:
 			Ns = self.Ns[hashable_state]
 			if Ns == 0:
 				Ns = 1e-8
+			# a variant of PUCT
 			uct = self.Q[hashable_state][a] + self.configs.cpuct * self.P[hashable_state][a] * math.sqrt(Ns) / (1 + self.Nsa[hashable_state][a])
 			if uct > best_uct:
 				best_uct = uct
 				best_action = a
-
-		# open-loop特性：先从缓存中随机抽出一个真实轨迹作为起点
+		# transition. For open loop, first sample from an existing realization
 		state = self._sample_realization(hashable_state)
-		# 再基于动作获得下一个状态
 		next_state = self._get_next_state(state, best_action)
 		
-		# 递归向下搜索
+		# 1. if not leaf, continue traversing, and state=s will get the value from the leaf node
+		# 2. if leaf, we will expand it and return the value for backpropagation
 		v = self.search(next_state)
 
-		# 回传更新：更新Q/Ns/Nsa统计
+		# update stats
+		# add in new estimate and average
 		self.Q[hashable_state][best_action] = (self.Nsa[hashable_state][best_action] * self.Q[hashable_state][best_action] + v) / (self.Nsa[hashable_state][best_action] + 1)
 		self.Ns[hashable_state] += 1
 		self.Nsa[hashable_state][best_action] += 1
 
-		# 同时更新该后继状态下不同utterance的价值统计（方便最终输出最优生成文本）
+		# update v to realizations for NLG at inference
 		self._update_realizations_Vs(next_state, v)
+		# now we are single player, hence just v instead of -v
 		return v
 	
 	def get_best_realization(self, state:DialogSession, action: int):
-		# 在给定状态+动作下，从已采样的utterance中挑选价值最高的一句自然语言回复
 		prefetch_state = self._to_string_rep(state) + "__" + self.player.dialog_acts[action]
 		if prefetch_state not in self.realizations_Vs:
 			raise Exception("querying a state that has no realizations sampled before")
-		
+		# get the counts for all moves
+		# convert to prob
 		curr_best_v = -float('inf')
 		curr_best_realization = None
 		for sys_utt, v in self.realizations_Vs[prefetch_state].items():
@@ -265,7 +261,6 @@ class OpenLoopMCTS(MCTS):
 				curr_best_v = v
 				curr_best_realization = sys_utt
 		return curr_best_realization
-
 	
 
 class OpenLoopMCTSParallel(OpenLoopMCTS):
