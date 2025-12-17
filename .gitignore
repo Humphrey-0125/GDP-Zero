@@ -2,9 +2,7 @@ __pycache__
 .mypy_cache
 *.sh
 *.ipynb
-REPRODUCTION_GUIDE.md
 *.txt
-复现指南.md
 test_*
 test/*
 logs/*
