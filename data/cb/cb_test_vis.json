@@ -1,0 +1,179 @@
+{
+    "cb__0": {
+        "dialog": [
+            {
+                "er": [
+                    "I am interested in purchasing this item, but since it is used I can only afford to pay about 25"
+                ],
+                "ee": [
+                    "i mean, we can work out a deal, but that is way too low. how about 60?"
+                ]
+            },
+            {
+                "er": [
+                    "shoot, I only have about 40 in my account right now"
+                ],
+                "ee": []
+            }
+        ],
+        "item_info": {
+            "title": "Ubiquiti Networks UAP‑AC‑LITE",
+            "price": 65.0,
+            "description": "Price is firm.,Just a few month old.,As New. With box and all parts.  Great reliable AP. Set up once and forget about it; never need to reboot, restart like consumer AP; especially when you have high demand traffic with lots of concurrent users.  Perfect for large house or business.,Can set up as wireless uplink.  Each wire AP can support up to 4 wireless uplinks.,Dual Band and up to 400' range.,(1) 10/100/1000 Ethernet,https://www.ubnt.com/unifi/unifi-ap-ac-lite/",
+            "buyer_target": 49.0,
+            "seller_target": 65.0
+        }
+    },
+    "cb_housing_1": {
+        "dialog": [
+            {
+                "er": [
+                    "hi. price is quite high but i like the apt."
+                ],
+                "ee": [
+                    "Your offer is too low, I can not accept it. I need at least $2600"
+                ]
+            }
+        ],
+        "item_info": {
+            "title": "Heat, Water & Garbage Paid! Great new place to call home.",
+            "price": 2523.0,
+            "description": "Garden Village Apartments offers 1, 2 and 3 bedroom layouts with a range of amenities. Enjoy all-electric kitchens with a walk-in pantry (in select units), dishwashers, and private patios or balconies. We offer the use of tennis, volleyball and basketball courts, a swimming pool, and a playground for children. We also take care of your heat, water and garbage bills! Explore everything Fremont has to offer including entertainment, shopping, parks, and various dining options.",
+            "buyer_target": 1917.0,
+            "seller_target": 2523.0
+        }
+    },
+    "cb_electronics_2": {
+        "dialog": [
+            {
+                "er": [],
+                "ee": [
+                    "these are pretty vintage"
+                ]
+            },
+            {
+                "er": [
+                    "How old are they?"
+                ],
+                "ee": [
+                    "around 12 yrs"
+                ]
+            },
+            {
+                "er": [
+                    "Are they in working condition?"
+                ],
+                "ee": [
+                    "100% working or your money back"
+                ]
+            },
+            {
+                "er": [
+                    "Awesome. Well since I have to transport them and test them myself, would you take $76?"
+                ],
+                "ee": [
+                    "i can do $80 but you have to pick up today , no delivery"
+                ]
+            }
+        ],
+        "item_info": {
+            "title": "Vintage Advent Heritage tower speakers",
+            "price": 100.0,
+            "description": "These speakers are in great condition. My grandfather used these up until a few years ago when he passed away. They've been sitting in the house not being used since. We've kept them dusted and clean, but haven't used them in a while, so that's why we're selling them cheap. You are responsible for transportation and testing them out yourself.",
+            "buyer_target": 76.0,
+            "seller_target": 100.0
+        }
+    },
+    "cb_bike_3": {
+        "dialog": [
+            {
+                "er": [
+                    "Hi I am interested in your bike."
+                ],
+                "ee": [
+                    "Great, do you have any questions?"
+                ]
+            },
+            {
+                "er": [
+                    "I was wondering if you are willing to take 100 less for it? Also where did you keep the bike?"
+                ],
+                "ee": [
+                    "It is garage kept ever since I have owned it. It is top of the line. All new parts and rarely riden. I would not accept 100.00 I would work on my asking price of 1200.00 though"
+                ]
+            },
+            {
+                "er": [
+                    "I was asking if you would take 1100 not 100. Sorry I should have been more specific. Sounds liek a great bike, why are you selling it?"
+                ],
+                "ee": [
+                    "I am just getting to old to ride, and I have no children. I want someone else to enjoy it. I would accept 1100 for the bike, I want someone to own it who wil use it and have fun with it."
+                ]
+            },
+            {
+                "er": [
+                    "That sounds good to me and I thank you being so reasonable about it."
+                ],
+                "ee": []
+            }
+        ],
+        "item_info": {
+            "title": "Ellsworth moment mountain bike.Large",
+            "price": 1200.0,
+            "description": "I have had this bike for about 8 year. It rides great and many components have been upgraded. Call/text with any questions.",
+            "buyer_target": 1104.0,
+            "seller_target": 1200.0
+        }
+    },
+    "cb_bike_4": {
+        "dialog": [
+            {
+                "er": [
+                    "hi I am intereste din the bike"
+                ],
+                "ee": [
+                    "Awesome! Please hold for a moment while I complete a sale."
+                ]
+            },
+            {
+                "er": [
+                    "I have a limited budget and not a lot of time... I wanted to make an offer of 850"
+                ],
+                "ee": [
+                    "I understand - I am ready to work with you on this. As you know, this is a quality bike and well worth the asking price, however there is some room for negotiation."
+                ]
+            },
+            {
+                "er": [
+                    "so what do you think of 850"
+                ],
+                "ee": [
+                    "I can come down some - I would take $1000."
+                ]
+            },
+            {
+                "er": [
+                    "what about 900?"
+                ],
+                "ee": [
+                    "Meet in the middle? 950?"
+                ]
+            },
+            {
+                "er": [
+                    "okay , a bit more than I WANTED TO PAY BUT SEEMS REASONABLE. sorry for the caps, lol."
+                ],
+                "ee": [
+                    "Awesome! I think you are getting a great bike and hope you enjoy it!"
+                ]
+            }
+        ],
+        "item_info": {
+            "title": "Ellsworth moment mountain bike.Large",
+            "price": 1200.0,
+            "description": "I have had this bike for about 8 year. It rides great and many components have been upgraded. Call/text with any questions.",
+            "buyer_target": 912.0,
+            "seller_target": 1200.0
+        }
+    }
+}

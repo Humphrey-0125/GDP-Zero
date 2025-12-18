@@ -9,7 +9,7 @@ OUT_CSV = "./outputs/eval_summary.csv"
 records = []
 
 print(f"🔍 Scanning directory: {EVAL_DIR}")
-s
+
 if not os.path.exists(EVAL_DIR):
     print(f"[!] Directory {EVAL_DIR} not found. Please check path.")
     exit(1)

@@ -62,7 +62,7 @@ case $choice in
         echo "运行 GDP-Zero (n=10, k=3, Q_0=0.25)..."
         python runners/gdpzero.py \
             --output outputs/gdpzero_10sims_3rlz_0.25Q0_20dialogs.pkl \
-            --llm gpt-4o-mini \
+            --llm gpt-3.5-turbo \
             --num_mcts_sims 10 \
             --max_realizations 3 \
             --Q_0 0.25 \
@@ -72,7 +72,7 @@ case $choice in
         echo "运行 GDP-Zero (n=20, k=3, Q_0=0.0)..."
         python runners/gdpzero.py \
             --output outputs/gdpzero_20sims_3rlz_0.0Q0_20dialogs.pkl \
-            --llm gpt-4o-mini \
+            --llm gpt-3.5-turbo \
             --num_mcts_sims 20 \
             --max_realizations 3 \
             --Q_0 0.0 \
@@ -82,7 +82,7 @@ case $choice in
         echo "运行 GDP-Zero (n=50, k=3, Q_0=0.0)..."
         python runners/gdpzero.py \
             --output outputs/gdpzero_50sims_3rlz_0.0Q0_20dialogs.pkl \
-            --llm gpt-4o-mini \
+            --llm gpt-3.5-turbo \
             --num_mcts_sims 50 \
             --max_realizations 3 \
             --Q_0 0.0 \
@@ -92,14 +92,14 @@ case $choice in
         echo "运行 Baseline (Raw Prompting)..."
         python runners/raw_prompting.py \
             --output outputs/chatgpt_raw_prompt.pkl \
-            --llm gpt-4o-mini
+            --llm gpt-3.5-turbo
         ;;
     5)
         read -p "请输入结果文件路径: " result_file
         python test.py \
             -f "$result_file" \
             --output outputs/eval_vs_human.pkl \
-            --judge gpt-4o-mini
+            --judge gpt-3.5-turbo
         ;;
     6)
         read -p "请输入第一个结果文件路径: " file1
@@ -108,11 +108,11 @@ case $choice in
             -f "$file1" \
             --h2h "$file2" \
             --output outputs/eval_h2h.pkl \
-            --judge gpt-4o-mini
+            --judge gpt-3.5-turbo
         ;;
     7)
         echo "启动交互式演示..."
-        python interactive.py --algo gdpzero --llm gpt-4o-mini
+        python interactive.py --algo gdpzero --llm gpt-3.5-turbo
         ;;
     *)
         echo "无效选项"

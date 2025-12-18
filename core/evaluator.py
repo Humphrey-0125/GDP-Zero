@@ -35,18 +35,31 @@ class P4GEvaluator(RespRanker):
 		if random.random() < 0.5:
 			do_swap = True
 			resp_a, resp_b = resp_b, resp_a
+		# prompt = f"""
+		# The following is background information about Save the Children.
+		# Save the Children is head-quartered in London, and they work to help fight poverty around the world. Children need help in developing countries and war zones. Small donations like $1 or $2 go a long way to help.
+		# The following is a conversation between a Persuader and a Persuadee about a charity called Save the Children. The Persuader is trying to persuade the Persuadee to donate to Save the Children.
+		# {context}
+		# Which of the following responses can better help the Persuader convince the Persuadee to donate to Save the Children?
+		# A. Persuader: {resp_a}
+		# B. Persuader: {resp_b}
+		# C. Can't tell.
+		# Your can choose from either A, B, or C.
+		# Your choice:
+		# """.replace('\t', '').strip()
 		prompt = f"""
-		The following is background information about Save the Children.
-		Save the Children is head-quartered in London, and they work to help fight poverty around the world. Children need help in developing countries and war zones. Small donations like $1 or $2 go a long way to help.
-		The following is a conversation between a Persuader and a Persuadee about a charity called Save the Children. The Persuader is trying to persuade the Persuadee to donate to Save the Children.
-		{context}
-		Which of the following responses can better help the Persuader convince the Persuadee to donate to Save the Children?
-		A. Persuader: {resp_a}
-		B. Persuader: {resp_b}
-		C. Can't tell.
-		Your can choose from either A, B, or C.
-		Your choice:
-		""".replace('\t', '').strip()
+        The following is background information about Save the Children.
+        Save the Children is head-quartered in London, and they work to help fight poverty around the world. Children need help in developing countries and war zones. Small donations like $1 or $2 go a long way to help.
+        The following is a conversation between a Persuader and a Persuadee about a charity called Save the Children. The Persuader is trying to persuade the Persuadee to donate to Save the Children.
+        {context}
+        Which of the following responses can better help the Persuader convince the Persuadee to donate to Save the Children?
+        A. Persuader: {resp_a}
+        B. Persuader: {resp_b}
+        C. Can't tell.
+        Your can choose from either A, B, or C.
+        Please output ONLY the single letter (A, B, or C) without explanation.
+        Your choice:
+        """.replace('\t', '').strip()
 		logger.debug(f"prompt: {prompt}")
 		resps = self.gen_model.generate(prompt, **self.inference_args)
 		choices, rationales = self._process_resps(resps)
