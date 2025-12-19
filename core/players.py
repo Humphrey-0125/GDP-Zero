@@ -876,3 +876,190 @@ class PersuadeeChatModel(PersuadeeModel):
 		counted_das = Counter(sampled_das)
 		user_da = counted_das.most_common(1)[0][0]
 		return user_da
+
+
+# ==========================================
+#  Additions for CraigslistBargain (CB)
+# ==========================================
+
+class CBBuyerChatModel(PersuaderChatModel):
+    def __init__(self,
+            dialog_acts: List[str],
+            backbone_model,
+            max_hist_num_turns: int = 5,
+            conv_examples: List = [],
+            inference_args: dict = {}):
+        
+       # [关键修复1] 使用关键字参数调用父类，防止位置参数错乱导致 dict 传给 int
+        super().__init__(
+            dialog_acts=dialog_acts, 
+            backbone_model=backbone_model, 
+            max_hist_num_turns=max_hist_num_turns, 
+            conv_examples=conv_examples, 
+            inference_args=inference_args
+        )
+        
+		# =====================================================
+        # [修正] 严格对应 TRIP 论文 Table 9 (Page 16)
+        # =====================================================
+        self.da_prompts_mapping = {
+            # 1. Greetings
+            "greetings": "Please say hello or chat randomly.",
+            # 2. Ask a question
+            "ask_question": "Please ask any question about product, year, price, usage, etc.",
+            # 3. Answer a question
+            "answer_question": "Please provide information about the product, year, usage, etc.",
+            # 4. Propose the first price
+            "propose_first_price": "Please initiate a price or a price range for the product.",
+            # 5. Propose a counter price
+            "propose_counter_price": "Please propose a new price or a new price range.",
+            # 6. Use comparatives
+            "use_comparatives": "Please propose a vague price by using comparatives with existing price.",
+            # 7. Confirm information
+            "confirm_information": "Please ask a question about the information to be confirmed.",
+            # 8. Affirm confirmation
+            "affirm_confirmation": "Please give an affirmative response to a confirm.",
+            # 9. Deny confirmation
+            "deny_confirmation": "Please give a negative response to a confirm.",
+            # 10. Agree with the proposal
+            "agree_proposal": "Please agree with the proposed price.",
+            # 11. Disagree with a proposal
+            "disagree_proposal": "Please disagree with the proposed price.",
+
+			# --- [关键修复] 辅助 Keys ---
+            # 这些 key 不会被 MCTS 搜索到（只要不放进 dialog_acts 列表），
+            # 但必须存在，用于解析 gdpzero.py 中设置的 history dummy DA ("inform")
+            "inform": "Please provide information or continue the conversation.",
+            "quit": "Please end the conversation."
+        }
+        
+        # 3. 过滤动作空间 (只保留 mapping 中存在的动作)
+        self.dialog_acts = [da for da in dialog_acts if da in self.da_prompts_mapping]
+        logger.debug(f"CB Buyer Acts: {self.dialog_acts}")
+
+        # 4. 初始化 task_prompt
+        # 注意：P4G 在这里直接写死了 Prompt，但 CB 的商品信息还没进来。
+        # 所以我们先定义一个基础模板，或者留空，等待 set_item_info 被调用时再填充。
+        self.base_instruction = "Now enter the role-playing mode. In the following conversation, you will play as a buyer in a price bargaining game."
+        self.task_prompt = "" # 暂时为空，等待 injected item info
+
+        # 设置推理参数 (参照 P4G)
+        self.inference_args = {
+            "max_new_tokens": 64, # CB 回复一般较短
+            "temperature": 0.7,
+            "repetition_penalty": 1.0,
+            "do_sample": True,
+            "return_full_text": False,
+            **inference_args
+        }
+
+    def set_item_info(self, item_info):
+        """
+        这是 CB 特有的方法。
+        因为每个 Dialog 的商品不一样，所以必须在 gdpzero.py 循环里调用这个方法，
+        动态更新 self.task_prompt。
+        """
+        title = item_info.get('title', 'item')
+        price = item_info.get('price', 'unknown')
+        desc = item_info.get('description', '')
+
+        # 构造类似 P4G 的 task_prompt，但是带入了商品信息
+        # 参考 TRIP 论文 Table 19 的格式
+        self.task_prompt = f"""
+        {self.base_instruction}
+        You are the buyer who is trying to buy the {title} with the listing price of {price}.
+        Product description: {desc}
+        Please reply with only one short and succinct sentence.
+        
+        The following is the conversation history:
+        """
+        self.task_prompt = self.task_prompt.replace("\t", "").strip()
+
+    def _get_prompt(self, context, history):
+        """
+        重写获取 Prompt 的逻辑。
+        P4G 的父类通常会把 self.task_prompt 和 context 拼起来。
+        """
+        # 确保 task_prompt 已经被 set_item_info 设置过了
+        if not self.task_prompt:
+            logger.warning("Warning: Item info not set for CBBuyerChatModel!")
+        
+        # 拼接 Prompt：任务描述 + 对话历史 + "Buyer:"
+        # 注意：这里的 context 已经是处理过的对话历史字符串
+        full_prompt = f"{self.task_prompt}\n{context}\nBuyer: "
+        return full_prompt
+	
+
+
+class CBSellerChatModel(PersuadeeChatModel):
+    def __init__(self,
+            dialog_acts: List[str],
+            backbone_model,
+            max_hist_num_turns: int = 5,
+            conv_examples: List = [],
+            inference_args: dict = {}):
+        
+        # [核心修复] 必须显式指定父类参数名！
+        # PersuadeeChatModel 继承自 PersuadeeModel
+        # PersuadeeModel.__init__(self, dialog_acts, inference_args, backbone_model, conv_examples, max_hist_num_turns)
+        # 注意：原版 PersuadeeModel 的参数顺序非常乱！必须用 keyword arguments！
+        
+        super().__init__(
+            dialog_acts=dialog_acts, 
+            backbone_model=backbone_model, 
+            max_hist_num_turns=max_hist_num_turns, 
+            conv_examples=conv_examples, 
+            inference_args=inference_args
+        )
+        
+        # Seller 的动作通常比较简单，或者直接用 generic mapping
+        self.da_prompts_mapping = {
+            "greeting": "The Seller greets the buyer.",
+            "inform": "The Seller answers questions or provides info.",
+            "ask_price": "The Seller asks for a price.",
+            "agree_price": "The Seller agrees to the price.",
+            "disagree_price": "The Seller rejects the price.",
+            "counter_price": "The Seller offers a new price.",
+            "quit": "The Seller ends the chat.",
+            # 必须包含所有传入的 user_da，否则会被过滤掉
+            "propose_price": "The Seller proposes a price.", 
+            "ask_info": "The Seller asks for info." 
+        }
+        
+        self.dialog_acts = [da for da in dialog_acts if da in self.da_prompts_mapping]
+        self.task_prompt = "" 
+
+        self.inference_args = {
+            "max_new_tokens": 64,
+            "temperature": 1.0,
+            **inference_args
+        }
+
+    def set_item_info(self, item_info):
+        title = item_info.get('title', 'item')
+        price = item_info.get('price', 'unknown')
+        
+        # 参考 TRIP 论文 Table 13  # 但是这个地方没有加persona
+        self.task_prompt = f"""
+        Now enter the role-playing mode. In the following conversation, you will play as a seller in a price bargaining game.
+        You are the seller who is selling the {title} for {price}.
+        Your goal is to sell the item at a good price. Do not easily agree to low offers.
+        Please reply with only one short and succinct sentence.
+        
+        The following is the conversation history:
+        """
+        self.task_prompt = self.task_prompt.replace("\t", "").strip()
+
+    def _get_prompt(self, context, history):
+        return f"{self.task_prompt}\n{context}\nSeller: "
+
+
+class CBSystemPlanner(P4GChatSystemPlanner):
+    """
+    针对 CB 任务的规划器，主要用于 MCTS 中调用
+    """
+    def set_item_info(self, item_info):
+        self.item_info = item_info
+        # 同时更新内部引用的 model
+        if hasattr(self.generation_model, 'set_item_info'):
+             self.generation_model.set_item_info(item_info)

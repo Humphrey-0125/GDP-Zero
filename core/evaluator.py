@@ -102,3 +102,106 @@ class P4GEvaluator(RespRanker):
 		elif b_cnt > a_cnt:
 			return 1 if not do_swap else 0
 		return 2
+	
+
+
+# 这个地方参数设置应该看一看！！！！！！！！！！！！！！！！！！！！！！！
+class CBEvaluator(RespRanker):
+    def __init__(self, gen_model: GenerationModel):
+        super().__init__()
+        self.gen_model = gen_model
+        # 评估时的参数：温度设低一点，让它更理性
+        self.inference_args = {
+            "max_tokens": 5, 
+            "temperature": 0.0, 
+            "echo": False,
+            "n": 1, 
+            "stop": ["\n"] 
+        }
+    
+    def evaluate(self, context, resp_a, resp_b, item_info=None):
+        """
+        对比两个砍价回复，判断哪个更好。
+        新增 item_info 参数，用于在评估时告知裁判商品信息。
+        """
+        do_swap = False
+        # 随机交换 A/B 位置，防止模型总是偏爱选项 A
+        if random.random() < 0.5:
+            do_swap = True
+            resp_a, resp_b = resp_b, resp_a
+            
+        # 构造商品背景信息
+        if item_info:
+            title = item_info.get('title', 'item')
+            price = item_info.get('price', 'unknown price')
+            desc = item_info.get('description', '')
+            bg_info = f"Item: {title}\nListing Price: {price}\nDescription: {desc}"
+        else:
+            bg_info = "Item info is missing."
+
+        # 专门针对 CB 的评估 Prompt
+        # 这里的核心是把“劝捐”改成“以更低价格买到商品”
+        prompt = f"""
+        You are an expert in negotiation and bargaining psychology.
+        
+        [Product Information]
+        {bg_info}
+        
+        [Conversation Context]
+        The following is a conversation between a Buyer and a Seller. The Buyer is trying to purchase the item at a lower price.
+        {context}
+        
+        [Task]
+        Which of the following responses is more effective for the Buyer to negotiate a better deal (lower price) while maintaining a good conversation flow?
+        A. Buyer: {resp_a}
+        B. Buyer: {resp_b}
+        C. Can't tell / Both are equal.
+        
+        [Instruction]
+        - Choose A if response A is more strategic, polite yet firm, or logically persuasive.
+        - Choose B if response B is better.
+        - Choose C if both are similar or neither makes sense.
+        - Output ONLY the single letter (A, B, or C) without explanation.
+        
+        Answer:
+        """.replace('\t', '').strip()
+        
+        # logger.debug(f"prompt: {prompt}")
+        
+        # 调用模型生成评价
+        resps = self.gen_model.generate(prompt, **self.inference_args)
+        choices, rationales = self._process_resps(resps)
+        
+        # 投票逻辑
+        preference = self._majority_vote(choices, do_swap)
+        
+        return preference, {'choices': choices, 'rationales': rationales, 'do_swap': do_swap}
+
+    def _process_resps(self, resps:List[dict]):
+        choices = []
+        rationales = []
+        for resp in resps:
+            gen = resp['generated_text'].strip()
+            
+            # 更鲁棒的解析逻辑
+            choice = 'c'
+            if len(gen) > 0:
+                first_char = gen[0].lower()
+                if first_char in ['a', 'b', 'c']:
+                    choice = first_char
+                # 处理模型可能输出 "Option A" 的情况
+                elif 'a' in gen.lower()[:10]: choice = 'a'
+                elif 'b' in gen.lower()[:10]: choice = 'b'
+            
+            choices.append(choice)
+            rationales.append(gen)
+        return choices, rationales
+
+    def _majority_vote(self, resps:List[str], do_swap=False):
+        # 简化版投票，通常 n=1 时直接返回
+        if not resps: return 2
+        
+        c = resps[0]
+        if c == 'a': return 0 if not do_swap else 1
+        if c == 'b': return 1 if not do_swap else 0
+        return 2
