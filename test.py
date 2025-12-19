@@ -99,6 +99,7 @@ def main(args):
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
+	parser.add_argument('--dataset', type=str, default="p4g", choices=["p4g", "cb"], help='Dataset to use')
 	parser.add_argument('-f', type=str, help='path to the data file for comparing against human in p4g. See P4GEvaluator documentation to see the format of the file.')
 	parser.add_argument('--judge', type=str, default='gpt-3.5-turbo', help='which judge to use.', choices=['gpt-3.5-turbo', 'chatgpt'])
 	parser.add_argument('--h2h', type=str, default='', help='path to the data file for head to head comparison. If empty compare against human in p4g.')

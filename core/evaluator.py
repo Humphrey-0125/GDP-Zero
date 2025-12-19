@@ -141,6 +141,7 @@ class CBEvaluator(RespRanker):
 
         # 专门针对 CB 的评估 Prompt
         # 这里的核心是把“劝捐”改成“以更低价格买到商品”
+		# 修改后的 Prompt：不泄露策略，但强制改变评判重心
         prompt = f"""
         You are an expert in negotiation and bargaining psychology.
         
@@ -152,14 +153,15 @@ class CBEvaluator(RespRanker):
         {context}
         
         [Task]
-        Which of the following responses is more effective for the Buyer to negotiate a better deal (lower price) while maintaining a good conversation flow?
+        Which of the following responses is more effective for the Buyer to negotiate a better deal (lower price)?
         A. Buyer: {resp_a}
         B. Buyer: {resp_b}
         C. Can't tell / Both are equal.
         
         [Instruction]
-        - Choose A if response A is more strategic, polite yet firm, or logically persuasive.
-        - Choose B if response B is better.
+        - Ignore which one is more polite; focus on which one is a stronger bargaining tactic.
+        - Choose A if response A is more strategic, firm, or logically persuasive in driving the price down.
+        - Choose B if response B is better in this regard.
         - Choose C if both are similar or neither makes sense.
         - Output ONLY the single letter (A, B, or C) without explanation.
         
