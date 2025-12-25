@@ -180,6 +180,7 @@ class OpenAIModel(GenerationModel):
 		for resp in response.choices:
 			text = resp.text
 			gen_output.append({"generated_text": text})
+		print("gen_output:", gen_output)
 		return gen_output
 	
 
@@ -210,6 +211,7 @@ class OpenAIChatModel(OpenAIModel):
 		return super()._update_args(new_args)
 	
 	def generate(self, input_text, **_args):
+		print("input_text from OpenAIChatModel:", input_text)
 		logging.info("It is recommended to use chat_generate instead of generate for OpenAIChatModel")
 		messages = [{
 			"role": "user",
@@ -226,6 +228,7 @@ class OpenAIChatModel(OpenAIModel):
 	@retry(wait=wait_exponential(multiplier=2, min=2, max=8), stop=stop_after_attempt(15))
 	def chat_generate(self, messages: List[Dict], **gen_args):
 		# generate in a chat format
+		print("messages from OpenAIChatModel chat_generate:", messages)
 		from_cache, parameters = self._update_args(gen_args)
 		hashable_messages = [hashabledict(m) for m in messages]
 		parameters["messages"] = hashable_messages

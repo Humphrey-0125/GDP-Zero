@@ -172,10 +172,10 @@ class OpenLoopMCTS(MCTS):
 	def _get_next_state(self, state, best_action):
 		prefetch_state = self._to_string_rep(state) + "__" + self.player.dialog_acts[best_action]
 		if prefetch_state in self.realizations and len(self.realizations[prefetch_state]) == self.max_realizations:
-			# use the cached realization
+			# use the cached realization # 使用目前已有的回复
 			return self._sample_realization(prefetch_state)
 		
-		# otherwise, generate a new realization
+		# otherwise, generate a new realization  # 如果没有，新生成一个
 		next_state = self.game.get_next_state(state, best_action)
 		return next_state
 	

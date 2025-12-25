@@ -236,16 +236,16 @@ class P4GChatSystemPlanner(P4GSystemPlanner):
 		
 		# init with user
 		# if assistant_role == PersuasionGame.SYS:
-		# 	if keep_user_da:
-		# 		prompt_messages.append({
-		# 			"role": "user",
-		# 			"content": f"{PersuasionGame.USR}: [{PersuasionGame.U_Neutral}] Hello.".strip()
-		# 		})
-		# 	else:
-		# 		prompt_messages.append({
-		# 			"role": "user",
-		# 			"content": f"{PersuasionGame.USR}: Hello.".strip()
-		# 		})
+		#	 if keep_user_da:
+		#		 prompt_messages.append({
+		#			 "role": "user",
+		#			 "content": f"{PersuasionGame.USR}: [{PersuasionGame.U_Neutral}] Hello.".strip()
+		#		 })
+		#	 else:
+		#		 prompt_messages.append({
+		#			 "role": "user",
+		#			 "content": f"{PersuasionGame.USR}: Hello.".strip()
+		#		 })
 		# all the rest
 		for i, (role, da, utt) in enumerate(exp):
 			# truncate to reduce the size of the prompt
@@ -407,15 +407,15 @@ class PersuaderModel(DialogModel):
 		self.max_hist_num_turns = max_hist_num_turns
 		# prompts and DAs
 		self.da_prompts_mapping = {
-			PersuasionGame.S_Greeting:	 				"The Persuader greets the Persuadee.",
+			PersuasionGame.S_Greeting:					 "The Persuader greets the Persuadee.",
 			# start of persuasion strategies
-			PersuasionGame.S_CredibilityAppeal:	 		"The Persuader establishes credibility of Save the Children by citing its impact.",
-			PersuasionGame.S_EmotionAppeal:	 			"The Persuader uses an emotion appeal to convince the Persuadee.",
-			PersuasionGame.S_LogicalAppeal:	 			"The Persuader use of reasoning and evidence to convince the Persuadee.",
-			PersuasionGame.S_TaskRelatedInquiry:	 	"The Persuader asks about the Persuadee's knowledge or opinion related to Save the Children.",
-			PersuasionGame.S_PropositionOfDonation:	 	"The Persuader asks if the Persuadee would like to make a small donation.",
+			PersuasionGame.S_CredibilityAppeal:			 "The Persuader establishes credibility of Save the Children by citing its impact.",
+			PersuasionGame.S_EmotionAppeal:				 "The Persuader uses an emotion appeal to convince the Persuadee.",
+			PersuasionGame.S_LogicalAppeal:				 "The Persuader use of reasoning and evidence to convince the Persuadee.",
+			PersuasionGame.S_TaskRelatedInquiry:		 "The Persuader asks about the Persuadee's knowledge or opinion related to Save the Children.",
+			PersuasionGame.S_PropositionOfDonation:		 "The Persuader asks if the Persuadee would like to make a small donation.",
 			# end of persuasion strategies
-			PersuasionGame.S_Other:	 					"The Persuader responds to the Persuadee without using any persuaive strategy.",
+			PersuasionGame.S_Other:						 "The Persuader responds to the Persuadee without using any persuaive strategy.",
 		}
 		# only allow da that has the mapping
 		self.dialog_acts = [da for da in dialog_acts if da in self.da_prompts_mapping]
@@ -463,6 +463,7 @@ class PersuaderModel(DialogModel):
 		return prompt_exp.strip()
 	
 	def get_utterance(self, state:DialogSession, action:int) -> str:
+		print("PersuaderModel get_utterance")
 		# planner gives an action, state is history, you need to produce a response accrd to the action
 		da = self.dialog_acts[action]
 		da_prompt = self.da_prompts_mapping[da]
@@ -566,6 +567,7 @@ class PersuaderChatModel(PersuaderModel):
 		return prompt_messages
 	
 	def get_utterance(self, state:DialogSession, action:int) -> str:
+		print("PersuaderChatModel get_utterance")
 		return self.get_utterance_batched(state, action, batch=1)[0]
 	
 	def get_utterance_batched(self, state:DialogSession, action:int, batch:int=3) -> List[str]:
@@ -576,6 +578,7 @@ class PersuaderChatModel(PersuaderModel):
 			*self.prompt_examples,
 			{'role': 'system', 'content': self.new_task_prompt}
 		]
+		
 		if len(state) == 0:
 			messages.append({'role': 'user', 'content': f'{PersuasionGame.USR}: Hello.\n{da_prompt}'})
 		else:
@@ -585,6 +588,7 @@ class PersuaderChatModel(PersuaderModel):
 			**self.inference_args,
 			"num_return_sequences": batch,  # this will be changed to n inside chat_generate
 		}
+		print("PersuaderChatModel messages:", messages)
 		data = self.backbone_model.chat_generate(messages, **gen_args)
 		sys_resps = self.backbone_model._cleaned_chat_resp(
 			data, assistant_role=f"{PersuasionGame.SYS}:", user_role=f"{PersuasionGame.USR}:"
@@ -628,6 +632,7 @@ class PersuadeeModel(DialogModel):
 		return prompt_exps.strip()
 	
 	def get_utterance(self, state:DialogSession, action=None) -> str:
+		print("PersuadeeModel get_utterance")
 		assert(state[-1][0] == PersuasionGame.SYS)
 		prompt = f"""
 		{self.task_prompt}
@@ -721,6 +726,7 @@ class PersuadeeChatModel(PersuadeeModel):
 		return prompt_messages
 	
 	def get_utterance(self, state:DialogSession, action=None) -> str:
+		print("PersuadeeChatModel get_utterance")
 		assert(state[-1][0] == PersuasionGame.SYS)  # next turn is user's turn
 		messages = [
 			{'role': 'system', 'content': self.task_prompt},
@@ -883,183 +889,320 @@ class PersuadeeChatModel(PersuadeeModel):
 # ==========================================
 
 class CBBuyerChatModel(PersuaderChatModel):
-    def __init__(self,
-            dialog_acts: List[str],
-            backbone_model,
-            max_hist_num_turns: int = 5,
-            conv_examples: List = [],
-            inference_args: dict = {}):
-        
-       # [关键修复1] 使用关键字参数调用父类，防止位置参数错乱导致 dict 传给 int
-        super().__init__(
-            dialog_acts=dialog_acts, 
-            backbone_model=backbone_model, 
-            max_hist_num_turns=max_hist_num_turns, 
-            conv_examples=conv_examples, 
-            inference_args=inference_args
-        )
-        
+	def __init__(self,
+			dialog_acts: List[str],
+			backbone_model,
+			max_hist_num_turns: int = 5,
+			conv_examples: List = [],
+			inference_args: dict = {}):
+		
+	   # [关键修复1] 使用关键字参数调用父类，防止位置参数错乱导致 dict 传给 int
+		super().__init__(
+			dialog_acts=dialog_acts, 
+			backbone_model=backbone_model, 
+			max_hist_num_turns=max_hist_num_turns, 
+			conv_examples=conv_examples, 
+			inference_args=inference_args
+		)
+		
 		# =====================================================
-        # [修正] 严格对应 TRIP 论文 Table 9 (Page 16)
-        # =====================================================
-        self.da_prompts_mapping = {
-            # 1. Greetings
-            "greetings": "Please say hello or chat randomly.",
-            # 2. Ask a question
-            "ask_question": "Please ask any question about product, year, price, usage, etc.",
-            # 3. Answer a question
-            "answer_question": "Please provide information about the product, year, usage, etc.",
-            # 4. Propose the first price
-            "propose_first_price": "Please initiate a price or a price range for the product.",
-            # 5. Propose a counter price
-            "propose_counter_price": "Please propose a new price or a new price range.",
-            # 6. Use comparatives
-            "use_comparatives": "Please propose a vague price by using comparatives with existing price.",
-            # 7. Confirm information
-            "confirm_information": "Please ask a question about the information to be confirmed.",
-            # 8. Affirm confirmation
-            "affirm_confirmation": "Please give an affirmative response to a confirm.",
-            # 9. Deny confirmation
-            "deny_confirmation": "Please give a negative response to a confirm.",
-            # 10. Agree with the proposal
-            "agree_proposal": "Please agree with the proposed price.",
-            # 11. Disagree with a proposal
-            "disagree_proposal": "Please disagree with the proposed price.",
+		# [修正] 严格对应 TRIP 论文 Table 9 (Page 16)
+		# =====================================================
+		self.da_prompts_mapping = {
+			# 1. Greetings
+			"greetings": "Please say hello or chat randomly.",
+			# 2. Ask a question
+			"ask_question": "Please ask any question about product, year, price, usage, etc.",
+			# 3. Answer a question
+			"answer_question": "Please provide information about the product, year, usage, etc.",
+			# 4. Propose the first price
+			"propose_first_price": "Please initiate a price or a price range for the product.",
+			# 5. Propose a counter price
+			"propose_counter_price": "Please propose a new price or a new price range.",
+			# 6. Use comparatives
+			"use_comparatives": "Please propose a vague price by using comparatives with existing price.",
+			# 7. Confirm information
+			"confirm_information": "Please ask a question about the information to be confirmed.",
+			# 8. Affirm confirmation
+			"affirm_confirmation": "Please give an affirmative response to a confirm.",
+			# 9. Deny confirmation
+			"deny_confirmation": "Please give a negative response to a confirm.",
+			# 10. Agree with the proposal
+			"agree_proposal": "Please agree with the proposed price.",
+			# 11. Disagree with a proposal
+			"disagree_proposal": "Please disagree with the proposed price.",
 
 			# --- [关键修复] 辅助 Keys ---
-            # 这些 key 不会被 MCTS 搜索到（只要不放进 dialog_acts 列表），
-            # 但必须存在，用于解析 gdpzero.py 中设置的 history dummy DA ("inform")
-            "inform": "Please provide information or continue the conversation.",
-            "quit": "Please end the conversation."
-        }
-        
-        # 3. 过滤动作空间 (只保留 mapping 中存在的动作)
-        self.dialog_acts = [da for da in dialog_acts if da in self.da_prompts_mapping]
-        logger.debug(f"CB Buyer Acts: {self.dialog_acts}")
+			# 这些 key 不会被 MCTS 搜索到（只要不放进 dialog_acts 列表），
+			# 但必须存在，用于解析 gdpzero.py 中设置的 history dummy DA ("inform")
+			"inform": "Please provide information or continue the conversation.",
+			"quit": "Please end the conversation."
+		}
+		
+		# 3. 过滤动作空间 (只保留 mapping 中存在的动作)
+		self.dialog_acts = [da for da in dialog_acts if da in self.da_prompts_mapping]
+		logger.debug(f"CB Buyer Acts: {self.dialog_acts}")
 
-        # 4. 初始化 task_prompt
-        # 注意：P4G 在这里直接写死了 Prompt，但 CB 的商品信息还没进来。
-        # 所以我们先定义一个基础模板，或者留空，等待 set_item_info 被调用时再填充。
-        self.base_instruction = "Now enter the role-playing mode. In the following conversation, you will play as a buyer in a price bargaining game."
-        self.task_prompt = "" # 暂时为空，等待 injected item info
+		# 4. 初始化 task_prompt
+		# 注意：P4G 在这里直接写死了 Prompt，但 CB 的商品信息还没进来。
+		# 所以我们先定义一个基础模板，或者留空，等待 set_item_info 被调用时再填充。
+		self.base_instruction = "Now enter the role-playing mode. In the following conversation, you will play as a buyer in a price bargaining game."
+		self.task_prompt = "" # 暂时为空，等待 injected item info
 
-        # 设置推理参数 (参照 P4G)
-        self.inference_args = {
-            "max_new_tokens": 64, # CB 回复一般较短
-            "temperature": 0.7,
-            "repetition_penalty": 1.0,
-            "do_sample": True,
-            "return_full_text": False,
-            **inference_args
-        }
+		# 设置推理参数 (参照 P4G)
+		self.inference_args = {
+			"max_new_tokens": 64, # CB 回复一般较短
+			"temperature": 0.7,
+			"repetition_penalty": 1.0,
+			"do_sample": True,
+			"return_full_text": False,
+			**inference_args
+		}
 
-    def set_item_info(self, item_info):
-        """
-        这是 CB 特有的方法。
-        因为每个 Dialog 的商品不一样，所以必须在 gdpzero.py 循环里调用这个方法，
-        动态更新 self.task_prompt。
-        """
-        title = item_info.get('title', 'item')
-        price = item_info.get('price', 'unknown')
-        desc = item_info.get('description', '')
+	def set_item_info(self, item_info):
+		"""
+		这是 CB 特有的方法。
+		因为每个 Dialog 的商品不一样，所以必须在 gdpzero.py 循环里调用这个方法，
+		动态更新 self.task_prompt。
+		"""
+		title = item_info.get('title', 'item')
+		price = item_info.get('price', 'unknown')
+		desc = item_info.get('description', '')
 
-        # 构造类似 P4G 的 task_prompt，但是带入了商品信息
-        # 参考 TRIP 论文 Table 19 的格式
-        self.task_prompt = f"""
-        {self.base_instruction}
-        You are the buyer who is trying to buy the {title} with the listing price of {price}.
-        Product description: {desc}
-        Please reply with only one short and succinct sentence.
-        
-        The following is the conversation history:
-        """
-        self.task_prompt = self.task_prompt.replace("\t", "").strip()
+		# 构造类似 P4G 的 task_prompt，但是带入了商品信息
+		# 参考 TRIP 论文 Table 19 的格式
+		self.task_prompt = f"""
+		{self.base_instruction}
+		You are the buyer who is trying to buy the {title} with the listing price of {price}.
+		Product description: {desc}
+		Please reply with only one short and succinct sentence.
+		
+		The following is the conversation history:
+		"""
+		self.task_prompt = self.task_prompt.replace("\t", "").strip()
 
-    def _get_prompt(self, context, history):
-        """
-        重写获取 Prompt 的逻辑。
-        P4G 的父类通常会把 self.task_prompt 和 context 拼起来。
-        """
-        # 确保 task_prompt 已经被 set_item_info 设置过了
-        if not self.task_prompt:
-            logger.warning("Warning: Item info not set for CBBuyerChatModel!")
-        
-        # 拼接 Prompt：任务描述 + 对话历史 + "Buyer:"
-        # 注意：这里的 context 已经是处理过的对话历史字符串
-        full_prompt = f"{self.task_prompt}\n{context}\nBuyer: "
-        return full_prompt
+	def _get_prompt(self, context, history):
+		"""
+		重写获取 Prompt 的逻辑。
+		P4G 的父类通常会把 self.task_prompt 和 context 拼起来。
+		"""
+		# 确保 task_prompt 已经被 set_item_info 设置过了
+		if not self.task_prompt:
+			logger.warning("Warning: Item info not set for CBBuyerChatModel!")
+		
+		# 拼接 Prompt：任务描述 + 对话历史 + "Buyer:"
+		# 注意：这里的 context 已经是处理过的对话历史字符串
+		full_prompt = f"{self.task_prompt}\n{context}\nBuyer: "
+		return full_prompt
 	
 
 
 class CBSellerChatModel(PersuadeeChatModel):
-    def __init__(self,
-            dialog_acts: List[str],
-            backbone_model,
-            max_hist_num_turns: int = 5,
-            conv_examples: List = [],
-            inference_args: dict = {}):
-        
-        # [核心修复] 必须显式指定父类参数名！
-        # PersuadeeChatModel 继承自 PersuadeeModel
-        # PersuadeeModel.__init__(self, dialog_acts, inference_args, backbone_model, conv_examples, max_hist_num_turns)
-        # 注意：原版 PersuadeeModel 的参数顺序非常乱！必须用 keyword arguments！
-        
-        super().__init__(
-            dialog_acts=dialog_acts, 
-            backbone_model=backbone_model, 
-            max_hist_num_turns=max_hist_num_turns, 
-            conv_examples=conv_examples, 
-            inference_args=inference_args
-        )
-        
-        # Seller 的动作通常比较简单，或者直接用 generic mapping
-        self.da_prompts_mapping = {
-            "greeting": "The Seller greets the buyer.",
-            "inform": "The Seller answers questions or provides info.",
-            "ask_price": "The Seller asks for a price.",
-            "agree_price": "The Seller agrees to the price.",
-            "disagree_price": "The Seller rejects the price.",
-            "counter_price": "The Seller offers a new price.",
-            "quit": "The Seller ends the chat.",
-            # 必须包含所有传入的 user_da，否则会被过滤掉
-            "propose_price": "The Seller proposes a price.", 
-            "ask_info": "The Seller asks for info." 
-        }
-        
-        self.dialog_acts = [da for da in dialog_acts if da in self.da_prompts_mapping]
-        self.task_prompt = "" 
+	def __init__(self,
+			dialog_acts: List[str],
+			backbone_model,
+			max_hist_num_turns: int = 5,
+			conv_examples: List = [],
+			inference_args: dict = {}):
+		
+		# [核心修复] 必须显式指定父类参数名！
+		# PersuadeeChatModel 继承自 PersuadeeModel
+		# PersuadeeModel.__init__(self, dialog_acts, inference_args, backbone_model, conv_examples, max_hist_num_turns)
+		# 注意：原版 PersuadeeModel 的参数顺序非常乱！必须用 keyword arguments！
+		
+		super().__init__(
+			dialog_acts=dialog_acts, 
+			backbone_model=backbone_model, 
+			max_hist_num_turns=max_hist_num_turns, 
+			conv_examples=conv_examples, 
+			inference_args=inference_args
+		)
+		
+		# Seller 的动作通常比较简单，或者直接用 generic mapping
+		self.da_prompts_mapping = {
+			"greeting": "The Seller greets the buyer.",
+			"inform": "The Seller answers questions or provides info.",
+			"ask_price": "The Seller asks for a price.",
+			"agree_price": "The Seller agrees to the price.",
+			"disagree_price": "The Seller rejects the price.",
+			"counter_price": "The Seller offers a new price.",
+			"quit": "The Seller ends the chat.",
+			# 必须包含所有传入的 user_da，否则会被过滤掉
+			"propose_price": "The Seller proposes a price.", 
+			"ask_info": "The Seller asks for info." 
+		}
+		
+		self.dialog_acts = [da for da in dialog_acts if da in self.da_prompts_mapping]
+		self.task_prompt = "" 
 
-        self.inference_args = {
-            "max_new_tokens": 64,
-            "temperature": 1.0,
-            **inference_args
-        }
+		self.inference_args = {
+			"max_new_tokens": 64,
+			"temperature": 1.0,
+			**inference_args
+		}
 
-    def set_item_info(self, item_info):
-        title = item_info.get('title', 'item')
-        price = item_info.get('price', 'unknown')
-        
-        # 参考 TRIP 论文 Table 13  # 但是这个地方没有加persona
-        self.task_prompt = f"""
-        Now enter the role-playing mode. In the following conversation, you will play as a seller in a price bargaining game.
-        You are the seller who is selling the {title} for {price}.
-        Your goal is to sell the item at a good price. Do not easily agree to low offers.
-        Please reply with only one short and succinct sentence.
-        
-        The following is the conversation history:
-        """
-        self.task_prompt = self.task_prompt.replace("\t", "").strip()
+	def set_item_info(self, item_info):
+		title = item_info.get('title', 'item')
+		price = item_info.get('price', 'unknown')
+		
+		# 参考 TRIP 论文 Table 13  # 但是这个地方没有加persona
+		self.task_prompt = f"""
+		Now enter the role-playing mode. In the following conversation, you will play as a seller in a price bargaining game.
+		You are the seller who is selling the {title} for {price}.
+		Your goal is to sell the item at a good price. Do not easily agree to low offers.
+		Please reply with only one short and succinct sentence.
+		
+		The following is the conversation history:
+		"""
+		self.task_prompt = self.task_prompt.replace("\t", "").strip()
 
-    def _get_prompt(self, context, history):
-        return f"{self.task_prompt}\n{context}\nSeller: "
+	def _get_prompt(self, context, history):
+		return f"{self.task_prompt}\n{context}\nSeller: "
 
+
+# GDP-Zero/core/players.py (添加到文件末尾)
 
 class CBSystemPlanner(P4GChatSystemPlanner):
-    """
-    针对 CB 任务的规划器，主要用于 MCTS 中调用
-    """
-    def set_item_info(self, item_info):
-        self.item_info = item_info
-        # 同时更新内部引用的 model
-        if hasattr(self.generation_model, 'set_item_info'):
-             self.generation_model.set_item_info(item_info)
+	"""
+	CraigslistBargain (CB) 专用规划器。
+	重写初始化、Prompt 和 启发式估值函数 (heuristic)，彻底防止 P4G 泄露。
+	"""
+	def __init__(self, 
+			dialog_acts, max_hist_num_turns,
+			user_dialog_acts, user_max_hist_num_turns, 
+			generation_model: GenerationModel, 
+			conv_examples: List[DialogSession] = []) -> None:
+		
+		super().__init__(
+			dialog_acts, max_hist_num_turns,
+			user_dialog_acts, user_max_hist_num_turns,
+			generation_model, conv_examples
+		)
+		
+		# 1. 覆盖基础 Prompt
+		self.task_prompt = "You are a negotiation planner assisting a Buyer."
+		self.prompt_examples = []
+		self.new_task_prompt = "Conversation History:"
+		
+		# 2. 初始化 item_info，防止 set_item_info 还没被调用时报错
+		self.item_info = {'title': 'item', 'price': 'unknown'}
+
+	def set_item_info(self, item_info):
+		"""注入商品信息"""
+		self.item_info = item_info
+		title = item_info.get('title', 'item')
+		price = item_info.get('price', 'unknown')
+		
+		# 更新 Policy Prior 的 Prompt
+		self.task_prompt = f"""
+		You are a helpful assistant planning a negotiation strategy for a buyer.
+		Item: {title}. Listing Price: {price}.
+		
+		Your task is to predict the most likely next strategic move (Dialog Act) for the Buyer.
+		
+		Valid Actions:
+		{" ".join([f"[{da}]" for da in self.dialog_acts])}
+		""".replace("\t", "").strip()
+
+	def heuristic(self, state: DialogSession) -> float:
+		"""
+		[Refined 5-Scale] 细粒度启发式估值函数。
+		将当前局势分为 5 个等级，从彻底谈崩(-1.0)到完美成交(+1.0)。
+		这有助于 MCTS 感知到"虽然没成交，但情况在变好"的趋势。
+		"""
+		title = self.item_info.get('title', 'item')
+		price = self.item_info.get('price', 'unknown')
+		
+		# [核心优化] 定义 5 级分类标准
+		user_task_prompt = f"""
+		You are an expert negotiation judge evaluating a conversation between a Buyer and a Seller.
+		Item: {title}. Listing Price: {price}.
+		
+		Your Task: Determine the likelihood of reaching a deal based on the current situation and the latest price offered.
+		
+		Strictly choose exactly ONE label from the following 5 options:
+		
+		1. DEFINITELY_YES : Deal reached, offer accepted, or success confirmed.
+		2. LIKELY_YES : High likelihood, seller is interested, making concessions, or positive sentiment.
+		3. NEUTRAL : Ongoing negotiation, asking for info, or hard to tell.
+		4. LIKELY_NO : Low likelihood, seller rejected the specific offer, or gap is large.
+		5. DEFINITELY_NO : Negotiation failed, seller quit, or strong rejection/anger.
+		
+		Output ONLY the label (e.g., LIKELY_YES). Do not provide explanations.
+		""".strip()
+
+		messages = [
+			{'role': 'system', 'content': user_task_prompt},
+			{'role': 'system', 'content': "Conversation History:"}
+		]
+		
+		# 1. 转换并净化历史记录
+		hist_str = state.to_string_rep(keep_sys_da=True, keep_user_da=False)
+		hist_str = hist_str.replace("Persuader", "Buyer").replace("Persuadee", "Seller")
+		
+		messages.append({'role': 'user', 'content': hist_str})
+		messages.append({'role': 'assistant', 'content': "Likelihood Label:"}) # 引导输出
+
+		# 2. 采样参数设置
+		# 使用采样(Sampling)来获得概率分布的期望值，比单次贪婪搜索更鲁棒
+		inf_args = {
+			"max_new_tokens": 6,	 # 长度足够容纳 "DEFINITELY_NO"
+			"temperature": 1.0,	  # 保持一定的随机性以探测分布
+			"return_full_text": False,
+			"do_sample": True,
+			"num_return_sequences": 5, # 采样 5 次取平均
+		}
+
+		try:
+			data = self.generation_model.chat_generate(messages, **inf_args)
+		except Exception:
+			# 接口容错
+			return 0.0
+
+		# 3. 解析与加权打分
+		score_sum = 0.0
+		valid_count = 0
+		
+		# 定义分数映射表
+		score_map = {
+			"DEFINITELY_YES": 1.0,
+			"LIKELY_YES":	 0.5,
+			"NEUTRAL":		0.0,
+			"LIKELY_NO":	 -0.5,
+			"DEFINITELY_NO": -1.0
+		}
+		
+		for resp in data:
+			# 清洗文本：转大写，去标点，去空格
+			text = resp['generated_text'].strip().upper().replace(".", "").replace("[", "").replace("]", "")
+			print("heuristic text:", text)
+			# 打印调试信息（可选，用于观察模型判断是否准确）
+			# print(f"Heuristic sample: {text}")
+			
+			# 精确匹配与模糊匹配结合
+			matched_score = None
+			
+			# 优先精确匹配
+			if text in score_map:
+				matched_score = score_map[text]
+			else:
+				# 模糊匹配兜底
+				for label, score in score_map.items():
+					if label in text:
+						matched_score = score
+						break
+			
+			# 如果匹配到了有效分数
+			if matched_score is not None:
+				score_sum += matched_score
+				valid_count += 1
+			else:
+				# 极端兜底：如果输出了奇怪的东西（如 "YES"），尝试回退
+				if "YES" in text: score_sum += 0.5
+				elif "NO" in text: score_sum += -0.5
+				else: score_sum += 0.0
+				valid_count += 1
+			
+		# 返回平均分
+		final_score = float(score_sum / valid_count) if valid_count > 0 else 0.0
+		return final_score
