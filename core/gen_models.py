@@ -121,9 +121,11 @@ class APIModel(GenerationModel):
 		return response.json()
 
 
+# 在 OpenAI v0.28 中，openai.api_base 不能包含 /chat/completions，
+# 否则 SDK 会自动拼接成 .../chat/completions/chat/completions，导致 404 或 Invalid Request ！！！！！！ 这个报错很难发现
 class OpenAIModel(GenerationModel):
-	API_TOKEN = os.environ.get("OPENAI_API_KEY", "sk-ejyFNvi45V3BzCgKOEHhN8mc0Qt8lLS9xpZPSLZVeCgCADKl")
-	BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://yinli.one/v1")
+	API_TOKEN = os.environ.get("OPENAI_API_KEY", "sk-UmiwPCsmEX71AC0AuCTps5VS1O4HicUmWg7BKpJYhYfdfPD5")
+	BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.bltcy.ai/v1")
 
 	def __init__(self, model_name="text-curie-001"):
 		# check if model exists
@@ -155,8 +157,10 @@ class OpenAIModel(GenerationModel):
 			from_cache = not new_args.pop("do_sample")  # rely on caching
 		if "num_return_sequences" in new_args:
 			new_args["n"] = new_args.pop("num_return_sequences")
+		# [核心修复] 修复参数单位换算错误
 		if "repetition_penalty" in new_args:
 			new_args["frequency_penalty"] = new_args.pop("repetition_penalty")
+				
 		return from_cache, {**args, **new_args}
 
 	@lru_cache(maxsize=None)
@@ -228,7 +232,6 @@ class OpenAIChatModel(OpenAIModel):
 	@retry(wait=wait_exponential(multiplier=2, min=2, max=8), stop=stop_after_attempt(15))
 	def chat_generate(self, messages: List[Dict], **gen_args):
 		# generate in a chat format
-		print("messages from OpenAIChatModel chat_generate:", messages)
 		from_cache, parameters = self._update_args(gen_args)
 		hashable_messages = [hashabledict(m) for m in messages]
 		parameters["messages"] = hashable_messages

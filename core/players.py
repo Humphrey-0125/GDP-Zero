@@ -315,7 +315,10 @@ class P4GChatSystemPlanner(P4GSystemPlanner):
 			assert(state[-1][0] == PersuasionGame.USR)
 			messages += self.__proccess_chat_exp(state, keep_sys_da=True, keep_user_da=False)
 		# produce a response
+		print("P4G预测过程中传入chat_generate的messages是：", messages)
 		data = self.generation_model.chat_generate(messages, **self.inf_args)
+		print("P4G预测过程中chat_generate的输出data是：", data)
+
 
 		sampled_das = self._get_generated_da(data)
 		logger.debug(f"sampled das: {sampled_das}")
@@ -940,8 +943,9 @@ class CBBuyerChatModel(PersuaderChatModel):
 		}
 		
 		# 3. 过滤动作空间 (只保留 mapping 中存在的动作)
-		self.dialog_acts = [da for da in dialog_acts if da in self.da_prompts_mapping]
-		logger.debug(f"CB Buyer Acts: {self.dialog_acts}")
+		self.dialog_acts = dialog_acts
+		print(f"CB Buyer Acts: {self.dialog_acts}")
+		# logger.debug(f"CB Buyer Acts: {self.dialog_acts}")
 
 		# 4. 初始化 task_prompt
 		# 注意：P4G 在这里直接写死了 Prompt，但 CB 的商品信息还没进来。
@@ -1061,11 +1065,48 @@ class CBSellerChatModel(PersuadeeChatModel):
 
 
 # GDP-Zero/core/players.py (添加到文件末尾)
+## ===== 柏拉图 API 配置 =====
+import os
+import requests
+from typing import Dict, List, Optional
+PLATO_URL = "https://api.bltcy.ai/v1/chat/completions"
+PLATO_MODEL = "gpt-3.5-turbo-0125"
+PLATO_API_KEY = os.environ.get("PLATO_API_KEY", "sk-Teb2mDnGww8tGY96NfxNuIBERw6lzuP1F9zYZkvmPJ5XhsSn")
+if not PLATO_API_KEY:
+    raise RuntimeError("请先在环境变量中设置 PLATO_API_KEY，用于访问 https://api.plato.ai 的接口。")
+
+def call_plato_api(messages: List[Dict[str, str]], model: str = PLATO_MODEL,
+                              temperature: float = 0.5, max_tokens: int = 200) -> str:
+    """
+    调用 Plato API
+    """
+    print("call_plato_api")
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens
+    }
+
+    headers = {
+        "Authorization": f"Bearer {PLATO_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    try:
+        response = requests.post(PLATO_URL, json=payload, headers=headers)
+        response.raise_for_status()
+
+        result = response.json()
+        return result["choices"][0]["message"]["content"].strip()
+
+    except Exception as e:
+        print(f"Plato API call failed: {e}")
+        raise
 
 class CBSystemPlanner(P4GChatSystemPlanner):
 	"""
 	CraigslistBargain (CB) 专用规划器。
-	重写初始化、Prompt 和 启发式估值函数 (heuristic)，彻底防止 P4G 泄露。
+	重写 predict 和 heuristic，适配 Zero-shot MCTS。
 	"""
 	def __init__(self, 
 			dialog_acts, max_hist_num_turns,
@@ -1079,130 +1120,208 @@ class CBSystemPlanner(P4GChatSystemPlanner):
 			generation_model, conv_examples
 		)
 		
-		# 1. 覆盖基础 Prompt
-		self.task_prompt = "You are a negotiation planner assisting a Buyer."
-		self.prompt_examples = []
-		self.new_task_prompt = "Conversation History:"
-		
-		# 2. 初始化 item_info，防止 set_item_info 还没被调用时报错
+		# 初始化 item_info
 		self.item_info = {'title': 'item', 'price': 'unknown'}
+		self.dialog_acts = dialog_acts
+		
+		# [关键] 针对 Predict 的推理参数
+		# 既然是 MCTS Prior，我们需要采样多次 (n=10~15) 来形成概率分布
+		self.inf_args = {
+			"max_new_tokens": 12,
+			"temperature": 1.0,
+			"return_full_text": False,
+			"do_sample": True,
+			"num_return_sequences": 15,
+		}
 
 	def set_item_info(self, item_info):
-		"""注入商品信息"""
 		self.item_info = item_info
-		title = item_info.get('title', 'item')
-		price = item_info.get('price', 'unknown')
-		
-		# 更新 Policy Prior 的 Prompt
-		self.task_prompt = f"""
-		You are a helpful assistant planning a negotiation strategy for a buyer.
-		Item: {title}. Listing Price: {price}.
-		
-		Your task is to predict the most likely next strategic move (Dialog Act) for the Buyer.
-		
-		Valid Actions:
-		{" ".join([f"[{da}]" for da in self.dialog_acts])}
-		""".replace("\t", "").strip()
 
-	def heuristic(self, state: DialogSession) -> float:
+	def _get_generated_da(self, data) -> list:
 		"""
-		[Refined 5-Scale] 细粒度启发式估值函数。
-		将当前局势分为 5 个等级，从彻底谈崩(-1.0)到完美成交(+1.0)。
-		这有助于 MCTS 感知到"虽然没成交，但情况在变好"的趋势。
+		解析器：从模型的输出中提取 DA。
+		模型预期输出： "ask_price]" 或者 "ask_price" (因为我们在 prompt 里可能预置了 '[')
+		"""
+		pred_da = []
+		for resp in data:
+			text = resp['generated_text'].strip()
+			
+			# 简单的清洗：去掉可能存在的括号
+			clean_text = text.replace("[", "").replace("]", "").strip()
+			
+			# 匹配最长的前缀策略 (防止 subtring 匹配错误)
+			found = None
+			for da in self.dialog_acts:
+				if da == clean_text: # 优先精确匹配
+					found = da
+					break
+			
+			if not found:
+				# 模糊匹配尝试
+				for da in self.dialog_acts:
+					if da in clean_text:
+						found = da
+						break
+			
+			if found:
+				pred_da.append(found)
+			else:
+				# 如果没解析出来，记录一个 fallback (比如 inform) 或者忽略
+				# print(f"  [Warn] Failed to parse act from: {text}")
+				pass
+				
+		return pred_da
+
+	def predict(self, state: DialogSession) -> "Tuple[np.ndarray, float]":
+		"""
+		[重写核心] MCTS 扩展节点时调用。
+		目标：计算当前状态下，各个动作的先验概率 P(a|s)。
+		方法：让 LLM 采样生成 10 次，统计各个动作出现的频率。
 		"""
 		title = self.item_info.get('title', 'item')
 		price = self.item_info.get('price', 'unknown')
 		
-		# [核心优化] 定义 5 级分类标准
-		user_task_prompt = f"""
-		You are an expert negotiation judge evaluating a conversation between a Buyer and a Seller.
+		# 1. 过滤掉不想让模型选的动作 (Masking)
+		# 注意：这里仅仅是 Prompt 展示层面的过滤，实际上 calculate prob 时还是基于全集 self.dialog_acts
+		display_acts = [da for da in self.dialog_acts if da not in ['inform', 'quit']]
+		valid_acts_str = ", ".join([f"[{da}]" for da in display_acts])
+
+		# 2. 构建纯粹的“策略选择” Prompt
+		# 我们不让模型生成对话，只让它做选择题
+		sys_prompt = f"""
+		You are a negotiation expert assisting a Buyer.
 		Item: {title}. Listing Price: {price}.
 		
-		Your Task: Determine the likelihood of reaching a deal based on the current situation and the latest price offered.
+		Analyze the conversation history and select the SINGLE best strategic move from the list below.
 		
-		Strictly choose exactly ONE label from the following 5 options:
+		Valid Strategies: {valid_acts_str}
 		
-		1. DEFINITELY_YES : Deal reached, offer accepted, or success confirmed.
-		2. LIKELY_YES : High likelihood, seller is interested, making concessions, or positive sentiment.
-		3. NEUTRAL : Ongoing negotiation, asking for info, or hard to tell.
-		4. LIKELY_NO : Low likelihood, seller rejected the specific offer, or gap is large.
-		5. DEFINITELY_NO : Negotiation failed, seller quit, or strong rejection/anger.
-		
-		Output ONLY the label (e.g., LIKELY_YES). Do not provide explanations.
+		Output ONLY the strategy tag enclosed in brackets (e.g., ask_question). Do not write any dialogue content.
 		""".strip()
 
+		# 处理历史
+		hist_str = state.to_string_rep(keep_sys_da=True, keep_user_da=False)
+		hist_str = hist_str.replace("Persuader", "Buyer").replace("Persuadee", "Seller")
+
 		messages = [
-			{'role': 'system', 'content': user_task_prompt},
-			{'role': 'system', 'content': "Conversation History:"}
+			{'role': 'system', 'content': sys_prompt},
+			{'role': 'user', 'content': f"Conversation History:\n{hist_str}\n\nDetermine the Next Buyer Strategy. Output format: strategy_name\nResponse: "}
 		]
+
+		# 3. 调用生成
+		# 注意：因为我们在 prompt 最后加了 "["，模型可能会补全 "ask_price]"。
+		# 或者是输出完整的 "[ask_price]"，这取决于模型对 "Response: [" 的理解。
+		# 最稳妥的方式是不预填 "["，直接问 "Response:"，然后在 _get_generated_da 里处理
 		
-		# 1. 转换并净化历史记录
+		# 修正 Prompt 策略：不玩预填的花活，直接明确指令
+		messages[-1] = {'role': 'user', 'content': "Determine the Next Buyer Strategy. Output ONLY the bracketed tag.\nResponse:"}
+
+		print("MCTS的predict过程中传入chat_generate的messages是：", messages)
+		data = self.generation_model.chat_generate(messages, **self.inf_args)
+		# data = call_plato_api(messages)
+		print("MCTS的predict过程中chat_generate的输出data是：", data)
+		
+		# 4. 解析结果
+		sampled_das = self._get_generated_da(data)
+		
+		# 调试日志
+		# if len(sampled_das) == 0:
+		#	 print(f"  [Predict Debug] Raw outputs: {[d['generated_text'] for d in data]}")
+
+		# 5. 计算概率分布
+		prob = np.zeros(len(self.dialog_acts))
+		prob += self.smoothing # 平滑，防止 0 概率
+		
+		for da in sampled_das:
+			if da in self.dialog_acts:
+				prob[self.dialog_acts.index(da)] += 1.0
+		
+		# 归一化
+		prob /= prob.sum()
+		
+		# 6. 计算价值 (Heuristic)
+		v = self.heuristic(state)
+
+		return prob, v
+
+	def get_valid_moves(self, state):
+		"""屏蔽 inform/quit 等动作"""
+		mask = np.ones(len(self.dialog_acts))
+		forbidden_acts = ["inform", "quit"] # 根据需要调整
+		for i, da in enumerate(self.dialog_acts):
+			if da in forbidden_acts:
+				mask[i] = 0.0
+
+		return mask
+
+	def heuristic(self, state: DialogSession) -> float:
+		# ... (保持你现在的 Heuristic 代码不变，记得用你刚才修正过的 inf_args) ...
+		# ... 也就是 max_new_tokens=10, temperature=0.0 (或低温), repetition_penalty=1.0, stop=...
+		# 这里为了完整性简写了
+		
+		title = self.item_info.get('title', 'item')
+		price = self.item_info.get('price', 'unknown')
+		
+		user_task_prompt = f"""
+		You are an expert negotiation judge. Item: {title}, Price: {price}.
+		Evaluate likelihood of a deal: DEFINITELY_YES, LIKELY_YES, NEUTRAL, LIKELY_NO, DEFINITELY_NO.
+		Output ONLY the label.
+		"""
+		
 		hist_str = state.to_string_rep(keep_sys_da=True, keep_user_da=False)
 		hist_str = hist_str.replace("Persuader", "Buyer").replace("Persuadee", "Seller")
 		
-		messages.append({'role': 'user', 'content': hist_str})
-		messages.append({'role': 'assistant', 'content': "Likelihood Label:"}) # 引导输出
+		messages = [
+			{'role': 'system', 'content': user_task_prompt},
+			{'role': 'user', 'content': f"History:\n{hist_str}\n\nLikelihood Label:"}
+		]
 
-		# 2. 采样参数设置
-		# 使用采样(Sampling)来获得概率分布的期望值，比单次贪婪搜索更鲁棒
 		inf_args = {
-			"max_new_tokens": 6,	 # 长度足够容纳 "DEFINITELY_NO"
-			"temperature": 1.0,	  # 保持一定的随机性以探测分布
+			"max_new_tokens": 12,
+			"temperature": 1.1,
 			"return_full_text": False,
 			"do_sample": True,
-			"num_return_sequences": 5, # 采样 5 次取平均
+			"num_return_sequences": 10,
 		}
 
 		try:
+			print("Heuristic过程中传入chat_generate的messages是：", messages)
 			data = self.generation_model.chat_generate(messages, **inf_args)
-		except Exception:
-			# 接口容错
+			print("Heuristic过程中chat_generate的输出data是：", data)
+		except Exception as e:
+			print(f"Heuristic过程中chat_generate调用失败: {e}")
+			import traceback
+			print("详细错误信息:")
+			traceback.print_exc()
 			return 0.0
 
-		# 3. 解析与加权打分
+		# ... (解析逻辑保持不变) ...
 		score_sum = 0.0
 		valid_count = 0
-		
-		# 定义分数映射表
 		score_map = {
-			"DEFINITELY_YES": 1.0,
-			"LIKELY_YES":	 0.5,
-			"NEUTRAL":		0.0,
-			"LIKELY_NO":	 -0.5,
+			"DEFINITELY_YES": 1.0, 
+			"LIKELY_YES": 0.5, 
+			"NEUTRAL": 0.0,
+			"LIKELY_NO": -0.5, 
 			"DEFINITELY_NO": -1.0
 		}
 		
 		for resp in data:
-			# 清洗文本：转大写，去标点，去空格
-			text = resp['generated_text'].strip().upper().replace(".", "").replace("[", "").replace("]", "")
-			print("heuristic text:", text)
-			# 打印调试信息（可选，用于观察模型判断是否准确）
-			# print(f"Heuristic sample: {text}")
-			
-			# 精确匹配与模糊匹配结合
+			text = resp['generated_text'].strip().upper()
 			matched_score = None
-			
-			# 优先精确匹配
 			if text in score_map:
 				matched_score = score_map[text]
 			else:
-				# 模糊匹配兜底
 				for label, score in score_map.items():
 					if label in text:
 						matched_score = score
 						break
 			
-			# 如果匹配到了有效分数
 			if matched_score is not None:
 				score_sum += matched_score
 				valid_count += 1
 			else:
-				# 极端兜底：如果输出了奇怪的东西（如 "YES"），尝试回退
-				if "YES" in text: score_sum += 0.5
-				elif "NO" in text: score_sum += -0.5
-				else: score_sum += 0.0
+				score_sum += 0.0 # 无法识别按中立处理
 				valid_count += 1
-			
-		# 返回平均分
-		final_score = float(score_sum / valid_count) if valid_count > 0 else 0.0
-		return final_score
+				
+		return float(score_sum / valid_count) if valid_count > 0 else 0.0
